@@ -1,0 +1,42 @@
+# Python bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Packaging and Distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Microcontroller Firmware and Memory Dumps
+*.bin
+*.hex
+*.srec
+*.s19
+
+# CAN Bus Log and Trace Files
+*.asc
+*.blf
+*.trc
+*.log
+
+# Temporary and Scratch Directories
+tmp/
+scratch/

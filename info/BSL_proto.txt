@@ -1,0 +1,114 @@
+4.4.2 Bootstrap Loader Mode 2 - CAN Boot via CAN Pins
+The CAN boot mode of the bootstrap loader provides a mechanism to load program
+code/data via the MultiCAN module into the SPRAM, and start executing the loaded
+code from address D400 0000H (address of the first transmitted byte). A single data
+frame always transmits eight code/data bytes from the external host to the TC1796. The
+number of data frames to be received in CAN boot mode is programmable and depends
+on the required amount of code/data to be transmitted. The 16-bit data message count
+value DMSGC determines the number of code/data bytes to be transmitted as
+8 × MSGC with MSGC = 1 to 216. Therefore, the 48 Kbyte SPRAM of the TC1796 can
+be loaded completely during CAN boot mode.
+The communication between TC1796 and external host is based on the following three
+CAN standard frames:
+• Initialization frame - sent by the external host to the TC1796
+• Acknowledge frame - sent by the TC1796 to the external host
+• Data frame(s) - sent by the external host to the TC1796
+The initialization frame is used in the TC1796 for baud rate detection. After a successful
+baud rate detection is reported to the external host by the acknowledge frame, data is
+transmitted by data frames. Table 4-6 shows the parameters and settings of the three
+CAN standard frames used for CAN bootstrap loader.
+Table 4-6 CAN Bootstrap Loader Frames
+Frame Type Parameter Description
+Initialization 
+Frame
+
+Identifier 11-bit, don’t care
+DLC = 8 Data length code, 8 bytes transmitted within CAN frame
+Data byte 0 55H
+Data byte 1 55H
+Data byte 2 Acknowledge message identifier ACKID, low byte
+Data byte 3 Acknowledge message identifier ACKID, high byte
+Data byte 4 Data message count DMSGC, low byte
+Data byte 5 Data message count DMSGC, high byte
+Data byte 6 Data message identifier DMSGID, low byte
+Data byte 7 Data message identifier DMSGID, high byte
+
+
+TC1796
+System Units (Vol. 1 of 2)
+ Reset and Boot Operation
+
+User’s Manual 4-25 V2.0, 2007-07
+Reset, V2.0 
+
+Initialization Phase
+As in the ASC boot mode, as first task the CAN bootstrap loader has to determine the
+CAN baud rate at which the external host is communicating. This task requires the
+external host to send initialization frames continuously to the TC1796. The first two data
+bytes of the initialization frame include a 2-byte 5555H baud rate detection pattern, an
+11-bit (2-byte) identifier ACKID1) for the acknowledge frame, a 16-bit data message
+count value DMSGC, and an 11-bit (2-byte) identifier DMSGID1) to be used by the data
+frame.
+When CAN boot mode is entered, the CAN bootstrap loader program starts measuring
+signal pulses at the RXDCAN0 input. After reception and pulse measurements of a
+5555H bit pattern (data bytes 0 and 1 of the initialization frame), the CAN bootstrap loader
+program calculates the CAN baud rate and programs the baud rate registers of the
+MultiCAN module. The TC1796 is now ready to receive CAN frames with the baud rate
+of the external host.
+Acknowledge Phase
+In the acknowledge phase, the bootstrap loader waits until it receives the next correctly
+recognized initialization frame from the external host, and acknowledges this frame by
+generating a dominant bit in its ACK slot. Afterwards, the bootstrap loader transmits an
+acknowledge frame back to the external host indicating that it is now ready to receive
+
+Acknowledge 
+Frame
+
+Identifier Acknowledge message identifier ACKID as received by 
+data bytes [3:2] of the initialization frame
+DLC = 4 Data length code, 4 bytes transmitted within CAN frame
+Data bytes
+0/1
+
+Contents of bit-timing register
+
+Data bytes
+2/3
+
+Copy of acknowledge identifier from initialization frame
+
+Data frame Identifier Data message identifier DMSGID as sent by data bytes 
+[7:6] of the initialization frame
+DLC = 8 Data length code, 8 bytes transmitted within CAN frame
+Data bytes
+0 to 7
+
+Data bytes, assigned to increasing destination (SPRAM) 
+addresses
+
+
+
+
+----------------------
+
+
+
+APP NOTE
+
+A “0” means a low-level voltage is applied at the pin.
+After entering Bootstrap Loader mode, the device switches the clock system from initial
+PLL Freerunning Mode (VCO base frequency) to Prescaler Mode with a frequency
+divider of 1. Hence the system frequency becomes equal to the frequency of an external
+crystal which must be obligatorily connected between XTAL1/XTAL2 pins, if a Bootstrap
+Loader mode is selected upon power-on. The crystal frequency must be at least 10
+MHz.
+Further on, the HOST sends the Initialization CAN Frame to the device. The CAN-Bus
+baud rate used by the HOST is automatically detected based on this frame.
+Data Message Count DMSGC specifies the number of CAN Data Frames sent
+subsequently to the device.
+Data Message Identifier DMSGID specifies the identifier that all subsequent CAN Data
+Frames must carry. The identifier will be internally stored in the device and every
+incoming CAN Data Frame will be checked for the same identifier. Only 11 bit out of the
+16 bit are stored internally as identifier:
+The upper 3 bits of the 16-bit-word will be disregarded and the remaining word will
+be right-shifted by 2. This yields the 11-bit-identifier.

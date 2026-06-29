@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ag-bsl-boot-console"
+version = "0.1.0"
+description = "Python boot console for TC1796 CAN bootstrap and bootloader commands"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "python-can>=4.3",
+  "pyusb>=1.2",
+  "gs_usb>=0.3",
+  "libusb-package>=1.0",
+  "lz4>=4.3",
+  "hexrec>=0.4.0",
+]
+
+[project.scripts]
+bsl-console = "bsl_console.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
