@@ -32,7 +32,7 @@ The console tool accepts the following arguments to customize the connection, ta
 ### General & Target Selection
 * `--target`: Target microcontroller profile. Choices: `tc1796` (default), `tc1792`, `tc1766`.
 * `--interface`: The `python-can` interface backend (default: `gs_usb`). Examples: `pcan`, `socketcan`, `vector`, `kvaser`, etc.
-* `--channel`: The CAN channel identifier (default: `0` for `gs_usb`, `can0` for `vector` or `PCAN_USBBUS1` for `pcan`).
+* `--channel`: The CAN channel identifier. Default depends on the interface: `0` for `gs_usb`, `vector`, `kvaser`, and `canalystii`; `"PCAN_USBBUS1"` for `pcan`; `"CAN0"` for `nican`; and `"can0"` for `socketcan` (and other interfaces).
 * `--bitrate`: The CAN bus bitrate in bps (default: `500000`).
 
 ### CAN ID Overrides

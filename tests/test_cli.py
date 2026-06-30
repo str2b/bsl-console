@@ -261,6 +261,42 @@ def test_main_handles_keyboard_interrupt(monkeypatch) -> None:
     assert ret == 130
 
 
+def test_main_default_channels(monkeypatch) -> None:
+    from bsl_console.cli import main
+    import bsl_console.cli as cli
+
+    captured_configs = []
+
+    # Intercept CanTransport construction to capture Config
+    original_init = cli.CanTransport.__init__
+    def mock_init(self, config):
+        captured_configs.append(config)
+        original_init(self, config)
+
+    monkeypatch.setattr(cli.CanTransport, "__init__", mock_init)
+    # Mock BootConsole.cmdloop to raise KeyboardInterrupt so we don't start the loop
+    monkeypatch.setattr(cli.BootConsole, "cmdloop", MagicMock(side_effect=KeyboardInterrupt))
+
+    # Test each interface's default channel
+    interfaces_and_expected_defaults = {
+        "gs_usb": 0,
+        "pcan": "PCAN_USBBUS1",
+        "vector": 0,
+        "kvaser": 0,
+        "canalystii": 0,
+        "nican": "CAN0",
+        "socketcan": "can0",
+        "some_unknown_interface": "can0",
+    }
+
+    for interface, expected_channel in interfaces_and_expected_defaults.items():
+        main(["--interface", interface])
+        config = captured_configs[-1]
+        assert config.interface == interface
+        assert config.channel == expected_channel
+
+
+
 
 
 

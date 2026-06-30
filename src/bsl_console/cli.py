@@ -695,7 +695,18 @@ def main(argv: list[str] | None = None) -> int:
 
     channel = args.channel
     if channel is None:
-        channel = 0 if args.interface == "gs_usb" else "can0"
+        # Default channels for common python-can interfaces
+        default_channels = {
+            "gs_usb": 0,
+            "pcan": "PCAN_USBBUS1",
+            "vector": 0,
+            "kvaser": 0,
+            "canalystii": 0,
+            "nican": "CAN0",
+            "socketcan": "can0",
+        }
+        channel = default_channels.get(args.interface, "can0")
+
 
     extra: dict[str, object] = {}
     if args.interface == "gs_usb":
