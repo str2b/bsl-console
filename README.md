@@ -15,6 +15,30 @@ This implementation leverages the custom stage-2 bootloader design and binary:
 
 The `gs_usb` backend used with candelight_fw requires `pyusb` to be installed.
 
+## Installation
+
+Install the core console:
+
+```bash
+pip install .
+```
+
+Install optional features as needed:
+
+```bash
+# gs_usb backend support
+pip install .[gs_usb]
+
+# compressed read support (lz4)
+pip install .[compression]
+
+# SREC import/export support (hexrec)
+pip install .[srec]
+
+# all optional features
+pip install .[all]
+```
+
 ---
 
 ## Preparation

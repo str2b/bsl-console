@@ -6,6 +6,7 @@ from bsl_console.cli import BootConsole
 from bsl_console.bootloader import BootloaderClient
 from bsl_console.protocol import BootloaderResponse
 from bsl_console.targets import get_target
+from bsl_console.protocol import normalize_boot_identifier
 
 
 class FakeTransport:
@@ -294,6 +295,49 @@ def test_main_default_channels(monkeypatch) -> None:
         config = captured_configs[-1]
         assert config.interface == interface
         assert config.channel == expected_channel
+
+
+def test_main_uses_target_bootstrap_init_id_by_default(monkeypatch) -> None:
+    from bsl_console.cli import main
+    import bsl_console.cli as cli
+
+    captured_boot_console_kwargs = {}
+
+    def mock_boot_console_init(self, transport, **kwargs):
+        captured_boot_console_kwargs.update(kwargs)
+
+    monkeypatch.setattr(cli.BootConsole, "__init__", mock_boot_console_init)
+    monkeypatch.setattr(cli.BootConsole, "cmdloop", MagicMock(side_effect=KeyboardInterrupt))
+
+    ret = main(["--target", "tc1796", "--interface", "socketcan", "--channel", "can0"])
+    assert ret == 130
+    assert captured_boot_console_kwargs["bootstrap_init_arbitration_id"] == normalize_boot_identifier(get_target("tc1796").bootstrap_init_id)
+
+
+def test_main_respects_bootstrap_init_id_override(monkeypatch) -> None:
+    from bsl_console.cli import main
+    import bsl_console.cli as cli
+
+    captured_boot_console_kwargs = {}
+
+    def mock_boot_console_init(self, transport, **kwargs):
+        captured_boot_console_kwargs.update(kwargs)
+
+    monkeypatch.setattr(cli.BootConsole, "__init__", mock_boot_console_init)
+    monkeypatch.setattr(cli.BootConsole, "cmdloop", MagicMock(side_effect=KeyboardInterrupt))
+
+    ret = main([
+        "--target",
+        "tc1796",
+        "--interface",
+        "socketcan",
+        "--channel",
+        "can0",
+        "--bootstrap-init-id",
+        "0x321",
+    ])
+    assert ret == 130
+    assert captured_boot_console_kwargs["bootstrap_init_arbitration_id"] == 0x321
 
 
 

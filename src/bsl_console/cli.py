@@ -5,6 +5,7 @@ import cmd
 import shlex
 import sys
 from pathlib import Path
+from typing import Callable
 
 from .bootstrap import BootstrapConfig, BootstrapTransferClient
 from .bootloader import BootloaderClient
@@ -237,6 +238,155 @@ class BootConsole(cmd.Cmd):
         else:
             print(f"{command_name}: success={success} error={error} unknown={unknown}")
 
+    def _load_hexrec(self, command_name: str):
+        try:
+            from hexrec import SrecFile
+        except ImportError as exc:
+            print(f"{command_name} failed: hexrec package not found. {exc}")
+            return None
+        return SrecFile
+
+    def _write_read_payload(
+        self,
+        command_name: str,
+        address: int,
+        payload: bytes,
+        outfile: Path | None,
+        fmt: str,
+    ) -> None:
+        if outfile is None:
+            print(f"{command_name}: {len(payload)} bytes")
+            return
+
+        if fmt == "srec":
+            SrecFile = self._load_hexrec(command_name)
+            if SrecFile is None:
+                return
+            srec = SrecFile.from_blocks([(address, payload)])
+            srec.save(str(outfile))
+        else:
+            outfile.write_bytes(payload)
+        print(f"{command_name}: {len(payload)} bytes -> {outfile}")
+
+    def _execute_read_command(
+        self,
+        command_name: str,
+        arg: str,
+        usage: str,
+        reader: Callable[..., bytes],
+    ) -> None:
+        argv = shlex.split(arg)
+        if len(argv) < 2:
+            print(usage)
+            return
+
+        address = int(argv[0], 0)
+        size = int(argv[1], 0)
+        outfile = Path(argv[2]) if len(argv) >= 3 else None
+        fmt = argv[3].lower() if len(argv) >= 4 else "bin"
+
+        try:
+            payload = reader(address, size, progress_cb=self._progress)
+            self._progress_done()
+            self._write_read_payload(command_name, address, payload, outfile, fmt)
+        except Exception as exc:
+            self._progress_done()
+            print(f"{command_name} failed: {exc}")
+
+    def _load_program_blocks(
+        self,
+        command_name: str,
+        address: int,
+        file_path: Path,
+        fmt: str,
+        size: int,
+        origin_address: int | None,
+    ) -> list[tuple[int, bytes]] | None:
+        if fmt != "srec":
+            return [(address, file_path.read_bytes())]
+
+        if not file_path.is_file():
+            print(f"{command_name} failed: file '{file_path}' not found")
+            return None
+
+        SrecFile = self._load_hexrec(command_name)
+        if SrecFile is None:
+            return None
+
+        srec = SrecFile.load(str(file_path))
+        crop_size = max(0, int(size))
+        if address != 0:
+            if origin_address is not None:
+                if crop_size > 0:
+                    srec.memory.crop(origin_address, origin_address + crop_size)
+            else:
+                if crop_size > 0:
+                    srec.memory.crop(address, address + crop_size)
+                else:
+                    crop_size = srec.memory.content_endex - address
+                    srec.memory.crop(address, address + crop_size)
+
+        blocks = list(srec.memory.to_blocks())
+        if not blocks:
+            print(f"{command_name}: no SREC data to program after cropping/filtering")
+            return None
+
+        if address != 0 and origin_address is not None:
+            offset = address - origin_address
+            blocks = [(addr + offset, data) for addr, data in blocks]
+
+        return [(int(addr), bytes(data)) for addr, data in blocks]
+
+    def _execute_program_command(
+        self,
+        command_name: str,
+        destination_label: str,
+        arg: str,
+        programmer: Callable[..., list[BootloaderResponse]],
+    ) -> None:
+        argv = shlex.split(arg)
+        if len(argv) < 2:
+            print(
+                f"usage: {command_name} <address> <file> [format] [size] [origin_address]"
+            )
+            return
+
+        address = int(argv[0], 0)
+        file_path = Path(argv[1])
+        fmt = argv[2].lower() if len(argv) >= 3 else "bin"
+        size = int(argv[3], 0) if len(argv) >= 4 else 0
+        origin_address = int(argv[4], 0) if len(argv) >= 5 else None
+
+        try:
+            blocks = self._load_program_blocks(
+                command_name, address, file_path, fmt, size, origin_address
+            )
+            if not blocks:
+                return
+
+            show_address = fmt == "srec"
+            for block_address, data in blocks:
+                if show_address:
+                    print(
+                        f"Programming {len(data)} bytes to 0x{block_address:08X} ({destination_label})..."
+                    )
+                responses = programmer(
+                    block_address,
+                    data,
+                    verify=self.program_verify,
+                    progress_cb=self._progress,
+                )
+                self._progress_done()
+                response_name = (
+                    f"{command_name} (0x{block_address:08X})"
+                    if show_address
+                    else command_name
+                )
+                self._print_bootloader_responses(response_name, responses)
+        except Exception as exc:
+            self._progress_done()
+            print(f"{command_name} failed: {exc}")
+
     def do_bootstrap(self, arg: str) -> None:
         """bootstrap <bootloader.bin>: transfer a ROM-BSL stage-2 bootloader image."""
         argv = shlex.split(arg)
@@ -294,231 +444,33 @@ class BootConsole(cmd.Cmd):
 
     def do_read_uncompressed(self, arg: str) -> None:
         """read_uncompressed <address> <size> [outfile] [format]: dump bytes without compression."""
-        argv = shlex.split(arg)
-        if len(argv) < 2:
-            print("usage: read_uncompressed <address> <size> [outfile] [format]")
-            return
-        address = int(argv[0], 0)
-        size = int(argv[1], 0)
-        outfile = Path(argv[2]) if len(argv) >= 3 else None
-        fmt = argv[3].lower() if len(argv) >= 4 else "bin"
-        try:
-            payload = self.bootloader.read_uncompressed(
-                address, size, progress_cb=self._progress
-            )
-            self._progress_done()
-            if outfile is not None:
-                if fmt == "srec":
-                    try:
-                        from hexrec import SrecFile
-                    except ImportError as exc:
-                        print(
-                            f"read_uncompressed failed: hexrec package not found. {exc}"
-                        )
-                        return
-                    srec = SrecFile.from_blocks([(address, payload)])
-                    srec.save(str(outfile))
-                else:
-                    outfile.write_bytes(payload)
-                print(f"read_uncompressed: {len(payload)} bytes -> {outfile}")
-            else:
-                print(f"read_uncompressed: {len(payload)} bytes")
-        except Exception as exc:
-            self._progress_done()
-            print(f"read_uncompressed failed: {exc}")
+        self._execute_read_command(
+            "read_uncompressed",
+            arg,
+            "usage: read_uncompressed <address> <size> [outfile] [format]",
+            self.bootloader.read_uncompressed,
+        )
 
     def do_read_compressed(self, arg: str) -> None:
         """read_compressed <address> <size> [outfile] [format]: dump bytes using LZ4 transfer."""
-        argv = shlex.split(arg)
-        if len(argv) < 2:
-            print("usage: read_compressed <address> <size> [outfile] [format]")
-            return
-        address = int(argv[0], 0)
-        size = int(argv[1], 0)
-        outfile = Path(argv[2]) if len(argv) >= 3 else None
-        fmt = argv[3].lower() if len(argv) >= 4 else "bin"
-        try:
-            payload = self.bootloader.read_compressed(
-                address, size, progress_cb=self._progress
-            )
-            self._progress_done()
-            if outfile is not None:
-                if fmt == "srec":
-                    try:
-                        from hexrec import SrecFile
-                    except ImportError as exc:
-                        print(
-                            f"read_compressed failed: hexrec package not found. {exc}"
-                        )
-                        return
-                    srec = SrecFile.from_blocks([(address, payload)])
-                    srec.save(str(outfile))
-                else:
-                    outfile.write_bytes(payload)
-                print(f"read_compressed: {len(payload)} bytes -> {outfile}")
-            else:
-                print(f"read_compressed: {len(payload)} bytes")
-        except Exception as exc:
-            self._progress_done()
-            print(f"read_compressed failed: {exc}")
+        self._execute_read_command(
+            "read_compressed",
+            arg,
+            "usage: read_compressed <address> <size> [outfile] [format]",
+            self.bootloader.read_compressed,
+        )
 
     def do_program_spram(self, arg: str) -> None:
         """program_spram <address> <file> [format] [size] [origin_address]: program a binary or SREC image into SPRAM."""
-        argv = shlex.split(arg)
-        if len(argv) < 2:
-            print(
-                "usage: program_spram <address> <file> [format] [size] [origin_address]"
-            )
-            return
-        address = int(argv[0], 0)
-        file_path = Path(argv[1])
-        fmt = argv[2].lower() if len(argv) >= 3 else "bin"
-
-        if fmt == "srec":
-            if not file_path.is_file():
-                print(f"program_spram failed: file '{file_path}' not found")
-                return
-            try:
-                from hexrec import SrecFile
-            except ImportError as exc:
-                print(f"program_spram failed: hexrec package not found. {exc}")
-                return
-            try:
-                srec = SrecFile.load(str(file_path))
-                origin_address = int(argv[4], 0) if len(argv) >= 5 else None
-                size = int(argv[3], 0) if len(argv) >= 4 else 0
-
-                if address != 0:
-                    if origin_address is not None:
-                        if size > 0:
-                            srec.memory.crop(origin_address, origin_address + size)
-                    else:
-                        if size > 0:
-                            srec.memory.crop(address, address + size)
-                        elif len(argv) < 4:
-                            size = srec.memory.content_endex - address
-                            srec.memory.crop(address, address + size)
-
-                blocks = list(srec.memory.to_blocks())
-                if not blocks:
-                    print(
-                        "program_spram: no SREC data to program after cropping/filtering"
-                    )
-                    return
-
-                if address != 0 and origin_address is not None:
-                    offset = address - origin_address
-                    blocks = [(addr + offset, data) for addr, data in blocks]
-
-                for addr, data in blocks:
-                    print(f"Programming {len(data)} bytes to 0x{addr:08X} (spram)...")
-                    responses = self.bootloader.program_spram(
-                        addr,
-                        data,
-                        verify=self.program_verify,
-                        progress_cb=self._progress,
-                    )
-                    self._progress_done()
-                    self._print_bootloader_responses(
-                        f"program_spram (0x{addr:08X})", responses
-                    )
-            except Exception as exc:
-                self._progress_done()
-                print(f"program_spram failed: {exc}")
-            return
-
-        payload = file_path.read_bytes()
-        try:
-            responses = self.bootloader.program_spram(
-                address,
-                payload,
-                verify=self.program_verify,
-                progress_cb=self._progress,
-            )
-            self._progress_done()
-            self._print_bootloader_responses("program_spram", responses)
-        except Exception as exc:
-            self._progress_done()
-            print(f"program_spram failed: {exc}")
+        self._execute_program_command(
+            "program_spram", "spram", arg, self.bootloader.program_spram
+        )
 
     def do_program_flash(self, arg: str) -> None:
         """program_flash <address> <file> [format] [size] [origin_address]: program a binary or SREC image into flash."""
-        argv = shlex.split(arg)
-        if len(argv) < 2:
-            print(
-                "usage: program_flash <address> <file> [format] [size] [origin_address]"
-            )
-            return
-        address = int(argv[0], 0)
-        file_path = Path(argv[1])
-        fmt = argv[2].lower() if len(argv) >= 3 else "bin"
-
-        if fmt == "srec":
-            if not file_path.is_file():
-                print(f"program_flash failed: file '{file_path}' not found")
-                return
-            try:
-                from hexrec import SrecFile
-            except ImportError as exc:
-                print(f"program_flash failed: hexrec package not found. {exc}")
-                return
-            try:
-                srec = SrecFile.load(str(file_path))
-                origin_address = int(argv[4], 0) if len(argv) >= 5 else None
-                size = int(argv[3], 0) if len(argv) >= 4 else 0
-
-                if address != 0:
-                    if origin_address is not None:
-                        if size > 0:
-                            srec.memory.crop(origin_address, origin_address + size)
-                    else:
-                        if size > 0:
-                            srec.memory.crop(address, address + size)
-                        elif len(argv) < 4:
-                            size = srec.memory.content_endex - address
-                            srec.memory.crop(address, address + size)
-
-                blocks = list(srec.memory.to_blocks())
-                if not blocks:
-                    print(
-                        "program_flash: no SREC data to program after cropping/filtering"
-                    )
-                    return
-
-                if address != 0 and origin_address is not None:
-                    offset = address - origin_address
-                    blocks = [(addr + offset, data) for addr, data in blocks]
-
-                for addr, data in blocks:
-                    print(f"Programming {len(data)} bytes to 0x{addr:08X} (flash)...")
-                    responses = self.bootloader.program_flash(
-                        addr,
-                        data,
-                        verify=self.program_verify,
-                        progress_cb=self._progress,
-                    )
-                    self._progress_done()
-                    self._print_bootloader_responses(
-                        f"program_flash (0x{addr:08X})", responses
-                    )
-            except Exception as exc:
-                self._progress_done()
-                print(f"program_flash failed: {exc}")
-            return
-
-        payload = file_path.read_bytes()
-        try:
-            responses = self.bootloader.program_flash(
-                address,
-                payload,
-                verify=self.program_verify,
-                progress_cb=self._progress,
-            )
-            self._progress_done()
-            self._print_bootloader_responses("program_flash", responses)
-        except Exception as exc:
-            self._progress_done()
-            print(f"program_flash failed: {exc}")
+        self._execute_program_command(
+            "program_flash", "flash", arg, self.bootloader.program_flash
+        )
 
     def do_erase_sector(self, arg: str) -> None:
         """erase_sector <address>: erase exactly one sector containing address."""
@@ -744,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
 
     bootstrap_init_id_arb = args.bootstrap_init_id
     if bootstrap_init_id_arb is None:
-        bootstrap_init_id_arb = normalize_boot_identifier(bootstrap_ack_id_val)
+        bootstrap_init_id_arb = normalize_boot_identifier(bootstrap_init_id_val)
 
     response_id = args.response_id
     if response_id is None:

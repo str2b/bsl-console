@@ -10,6 +10,21 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "python-can>=4.3",
+]
+
+[project.optional-dependencies]
+gs_usb = [
+  "pyusb>=1.2",
+  "gs_usb>=0.3",
+  "libusb-package>=1.0",
+]
+compression = [
+  "lz4>=4.3",
+]
+srec = [
+  "hexrec>=0.4.0",
+]
+all = [
   "pyusb>=1.2",
   "gs_usb>=0.3",
   "libusb-package>=1.0",
